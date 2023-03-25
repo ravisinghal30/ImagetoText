@@ -37,8 +37,6 @@ public class CustomJsonReader {
 	public List<IngredientsCordinates>  readIngredientsFromImage() throws JsonProcessingException, IOException {
 		
 		ObjectMapper mapper = new ObjectMapper();
-		//JsonNode node = mapper.reader().readTree(Files.newInputStream(Paths.get("/home/ravi/Downloads/response.txt"), StandardOpenOption.READ));
-		
 		JsonFactory factory = new JsonFactory();
 		factory.setCodec(mapper);
 		JsonParser parser= factory.createParser(Files.newInputStream(Paths.get("/home/ravi/Downloads/response4.txt"), StandardOpenOption.READ));
@@ -49,6 +47,7 @@ public class CustomJsonReader {
 				iterateObject((JsonNode) treeNode);
 			}catch(Exception e) {
 				System.out.println(e.getMessage());
+				e.printStackTrace();
 			}
 		}
 		  
@@ -62,32 +61,48 @@ public class CustomJsonReader {
 				//System.out.println(in.getIngredient()+ " = "+ in);
 			}
 		}
-		
-		for(IngredientsCordinates inc : ingredients) {
+		for(int i = 0 ; i< ingredients.size() ;i++) {
+			IngredientsCordinates inc = ingredients.get(i);
+			if(inc.getVertices().get(0).getX() > minServeIndex) {
+				continue;
+			}
 			List<Vertices> v = inc.getVertices();
 			StringBuilder builder = new StringBuilder();
 			builder.append(inc.getIngredient());
-			Iterator<IngredientsCordinates> c = ingredients.iterator();
-			while(c.hasNext() ) {
-				IngredientsCordinates ing = c.next();
-				if(v.get(1).getY() == ing.getVertices().get(0).getY()) {
+			for(int j = i+1 ; j< ingredients.size() ;j++) {
+				IngredientsCordinates ing = ingredients.get(j);
+				if((v.get(0).getY() == ing.getVertices().get(0).getY() || v.get(1).getY() == ing.getVertices().get(0).getY())
+							&& v.get(0).getX() < minServeIndex 
+							&& ing.getVertices().get(0).getX() < minServeIndex ) {
 					builder.append(" "+ing.getIngredient());
+					if(builder.length() > 50) {
+						ing = null;
+						break;
+					}
+					if(inc.getUnit() == null) { // Just to be safe
+						if(ing.getUnit() != null) {
+							inc.setUnit(ing.getUnit());
+						}
+					}
 					ing = null;
 				}
 			}
-			inc.setIngredient(builder.toString());
+			if(builder.length() > 50) {
+				inc = null;
+			}else inc.setIngredient(builder.toString());
 			
 		}
-		//System.out.println(ingredients); System.out.println(ingrediantValues);
+		//System.out.println(ingredients); 
+		System.out.println(ingrediantValues);
 		return ingredients;
 	}
 	
 	private  int findY(Map<Integer, BigDecimal> ingrediantValues, List<Vertices> v ) {
 		Optional<Integer> y = v.stream().filter(it -> ingrediantValues.get(it.getY()) !=null ).map(it -> it.getY()).findFirst();
 		if(!y.isPresent()) {
-			for(int i =0 ; i< 4 ;i++) {
+			for(int i =0 ; i< 5 ;i++) {
 				for(Vertices it  : v) {
-					if(ingrediantValues.get(it.getY() + i) != null) {
+					if(ingrediantValues.get(it.getY() + i) != null && it.getX() < minServeIndex) {
 						return it.getY()+i;
 					}
 				}
@@ -128,28 +143,29 @@ public class CustomJsonReader {
 						while(verticesItr.hasNext()) {
 							JsonNode vertice = verticesItr.next();
 							if(minServeIndex > 0 && maxServeIndex > 0) {
-								if(vertice.path("x").asInt() >= minServeIndex && vertice.path("x").asInt() <= maxServeIndex )
+								if(vertice.path("x").asInt() >= minServeIndex && vertice.path("x").asInt() <= maxServeIndex ) {
 									ingrediantValues.putIfAbsent(vertice.path("y").asInt(), BigDecimal.valueOf(number));
+								}
+									
 							}else {
 								//find for Per 100g
-								int index = 0;
 								for (IngredientsCordinates ing : ingredients) {
 									if(ing.getIngredient().equals("Per")) {
-										IngredientsCordinates in =  ingredients.get(index+1);
-										if(in.getIngredient().equalsIgnoreCase("100g")) {
+										if(ingredients.indexOf(ing) >= ingredients.size() -1) continue;
+										IngredientsCordinates in =  ingredients.get(ingredients.indexOf(ing)+1);
+										if(in.getIngredient().contains("100") || in.getIngredient().contains("g")) {
+											System.out.println("Found 100g "+in);
+											System.out.println("Found per "+ing);
 											Optional<Vertices> min = ing.getVertices().stream().min(Comparator.comparing(Vertices:: getX));
-											Optional<Vertices> max = ing.getVertices().stream().max(Comparator.comparing(Vertices:: getX));
+											Optional<Vertices> max = in.getVertices().stream().max(Comparator.comparing(Vertices:: getX));
 											if(min.isPresent()) {
-												minServeIndex = min.get().getX() - 20;
+												minServeIndex = min.get().getX() -20;
 											}
 											if(max.isPresent()) {
-												maxServeIndex = max.get().getX();
+												maxServeIndex = max.get().getX() ;
 											}
-											
-											//System.out.println("Found per 100g "+minServeIndex +" : "+maxServeIndex);
 											break;
 										}
-										index++;
 									}
 									
 								}
@@ -172,18 +188,27 @@ public class CustomJsonReader {
 							list.add(v);
 						}
 						cor.setVertices(list);
-						ingredients.add(cor);
-						if(description.equals("Serve")) {
-							Optional<Vertices> min = cor.getVertices().stream().min(Comparator.comparing(Vertices:: getX));
-							Optional<Vertices> max = cor.getVertices().stream().max(Comparator.comparing(Vertices:: getX));
-							if(min.isPresent()) {
-								minServeIndex = min.get().getX() - 20;
+						//ingredients.add(cor);
+						
+						// check if the last element of the list is Per for satisfy the string Per Serve
+						if(ingredients.size() > 0 && description.equals("Serve")) {
+							IngredientsCordinates lastElem =  ingredients.get(ingredients.size() - 1);
+							System.out.println("Last "+lastElem);
+							if(lastElem.getIngredient().equalsIgnoreCase("per")) {
+								Optional<Vertices> min = lastElem.getVertices().stream().min(Comparator.comparing(Vertices:: getX));
+								Optional<Vertices> max = cor.getVertices().stream().max(Comparator.comparing(Vertices:: getX));
+								if(min.isPresent()) {
+									//minServeIndex = min.get().getX() - 20;
+									minServeIndex = min.get().getX() ;
+								}
+								if(max.isPresent()) {
+									maxServeIndex = max.get().getX();
+								}
+								System.out.println("Found "+minServeIndex +" : "+maxServeIndex);
 							}
-							if(max.isPresent()) {
-								maxServeIndex = max.get().getX();
-							}
-							//System.out.println("Found "+minServeIndex +" : "+maxServeIndex);
 						}
+						ingredients.add(cor);
+					
 					}
 					
 					
